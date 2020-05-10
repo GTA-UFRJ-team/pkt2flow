@@ -2,7 +2,8 @@
 #define FIT_USEC	1000000		/* fit all times to microseconds */
 #define BLOCK_TIMER	-1		/* stop the timer that remove flows from the list */
 #define IP_TYPE		8		/* code of IP protocol */
-
+#define FORWARD		0		/* flow direction client -> server */
+#define BARCKWARD	1		/* flow direction client <- server */
 
 /* ethernet headers are always exactly 14 bytes [1] */
 #define SIZE_ETHERNET 14
@@ -73,28 +74,57 @@ struct sniff_udp{
 
 /* Flow features */
 typedef struct flowFeatures{
-	bpf_u_int32 flowSize;				/* total flow size in bytes */
-	bpf_u_int32 smallestPacket;			/* smallest packet of the flow */
-	bpf_u_int32 largestPacket;			/* largest packet of the flow */
-	bpf_u_int32 totalPackets;			/* total packets of the flow */
-	bpf_u_int32 totalPSH;				/* total PSH flags of the flow */
-	bpf_u_int32 totalURG;				/* total URG flags of the flow */	
-	bpf_u_int32 totalFIN;				/* total FIN flags of the flow */	
-	bpf_u_int32 totalACK;				/* total ACK flags of the flow */	
-	bpf_u_int32 totalCWR;				/* total CWR flags of the flow */	
-	bpf_u_int32 totalECE;				/* total ECE flags of the flow */	
-	bpf_u_int32 totalPUSH;				/* total PUSH flags of the flow */	
-	bpf_u_int32 totalRST;				/* total RST flags of the flow */	
-	bpf_u_int32 totalSYN;				/* total SYN flags of the flow */	
-	double meanPacketSize;				/* mean packet size of the flow */
-	double stdPacketSize;				/* standart deviation of packets size */
-	double meanTimePacket;				/* mean time between packets in microseconds */
-	double stdTimePacket;				/* standart deviation time between packets in microseconds */
-	time_t minTimePacket;				/* minimum time between packets in microseconds */
-	time_t maxTimePacket;				/* maximum time between packets in microseconds */
-	time_t totalTime;				/* time between the first and the last packets, the maximum time is 2 seconds */
-	time_t firstTime;				/* first packet time in microseconds */
-	time_t lastTime;				/* last packet time in microseconds */
+
+	/********************************************** forward features *************************************************/
+
+	bpf_u_int32 flowForwardSize;			/* total flow size in bytes */
+	bpf_u_int32 smallestForwardPacket;		/* smallest packet of the flow */
+	bpf_u_int32 largestForwardPacket;		/* largest packet of the flow */
+	bpf_u_int32 totalForwardPackets;		/* total packets of the flow */
+	bpf_u_int32 totalForwardPSH;			/* total PSH flags of the flow */
+	bpf_u_int32 totalForwardURG;			/* total URG flags of the flow */	
+	bpf_u_int32 totalForwardFIN;			/* total FIN flags of the flow */	
+	bpf_u_int32 totalForwardACK;			/* total ACK flags of the flow */	
+	bpf_u_int32 totalForwardCWR;			/* total CWR flags of the flow */	
+	bpf_u_int32 totalForwardECE;			/* total ECE flags of the flow */	
+	bpf_u_int32 totalForwardPUSH;			/* total PUSH flags of the flow */	
+	bpf_u_int32 totalForwardRST;			/* total RST flags of the flow */	
+	bpf_u_int32 totalForwardSYN;			/* total SYN flags of the flow */	
+	double meanForwardPacketSize;			/* mean packet size of the flow */
+	double stdForwardPacketSize;			/* standart deviation of packets size */
+	double meanForwardTimePacket;			/* mean time between packets in microseconds */
+	double stdForwardTimePacket;			/* standart deviation time between packets in microseconds */
+	time_t minForwardTimePacket;			/* minimum time between packets in microseconds */
+	time_t maxForwardTimePacket;			/* maximum time between packets in microseconds */
+	time_t totalForwardTime;			/* time between the first and the last packets, the maximum time is 2 seconds */
+	time_t firstForwardTime;			/* first packet time in microseconds */
+	time_t lastForwardTime;				/* last packet time in microseconds */
+
+	
+	/***************************************** backward features  ****************************************/	
+	
+	bpf_u_int32 flowBackwardSize;			/* total flow size in bytes */
+	bpf_u_int32 smallestBackwardPacket;		/* smallest packet of the flow */
+	bpf_u_int32 largestBackwardPacket;		/* largest packet of the flow */
+	bpf_u_int32 totalBackwardPackets;		/* total packets of the flow */
+	bpf_u_int32 totalBackwardPSH;			/* total PSH flags of the flow */
+	bpf_u_int32 totalBackwardURG;			/* total URG flags of the flow */	
+	bpf_u_int32 totalBackwardFIN;			/* total FIN flags of the flow */	
+	bpf_u_int32 totalBackwardACK;			/* total ACK flags of the flow */	
+	bpf_u_int32 totalBackwardCWR;			/* total CWR flags of the flow */	
+	bpf_u_int32 totalBackwardECE;			/* total ECE flags of the flow */	
+	bpf_u_int32 totalBackwardPUSH;			/* total PUSH flags of the flow */	
+	bpf_u_int32 totalBackwardRST;			/* total RST flags of the flow */	
+	bpf_u_int32 totalBackwardSYN;			/* total SYN flags of the flow */	
+	double meanBackwardPacketSize;			/* mean packet size of the flow */
+	double stdBackwardPacketSize;			/* standart deviation of packets size */
+	double meanBackwardTimePacket;			/* mean time between packets in microseconds */
+	double stdBackwardTimePacket;			/* standart deviation time between packets in microseconds */
+	time_t minBackwardTimePacket;			/* minimum time between packets in microseconds */
+	time_t maxBackwardTimePacket;			/* maximum time between packets in microseconds */
+	time_t totalBackwardTime;			/* time between the first and the last packets, the maximum time is 2 seconds */
+	time_t firstBackwardTime;			/* first packet time in microseconds */
+	time_t lastBackwardTime;			/* last packet time in microseconds */
 } flowFeatures_t;
 
 /* Flow header definition */
@@ -104,6 +134,7 @@ typedef struct flowID{
 	unsigned short int portDst;
 	unsigned short int portSrc;
 	unsigned short int protocol;
+	unsigned char direction; 
 	double time; 					/* time to expire the flow entry */
 } flowID_t;
 

@@ -32,8 +32,8 @@
 #include <arpa/inet.h>
 
 
-#include "structures.h"
-#include "functionHeader.h"
+#include "oneDirection-noTcpState-structures.h"
+#include "oneDirection-noTcpState-functionHeader.h"
 #include "configuration.h"
 
 

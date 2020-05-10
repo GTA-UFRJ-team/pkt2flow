@@ -48,7 +48,7 @@ double		timer;					/* contains the time to remove the oldest flow */
 /******************************** Flow list interaction functions **********************************/
 
 flowList_t * 
-findFlow(flowID_t flow, bool *find)
+findFlow(flowID_t flow, bool *find, char *direction)
 {
 	flowList_t *currentFlow;
 	currentFlow = LIST_FIRST;
@@ -58,14 +58,28 @@ findFlow(flowID_t flow, bool *find)
 	{
 
 		if(	
-			!(strcmp(currentFlow->flowHeader.ipSrc,flow.ipSrc)) &&
+			(!(strcmp(currentFlow->flowHeader.ipSrc,flow.ipSrc)) &&
 			!(strcmp(currentFlow->flowHeader.ipDst,flow.ipDst)) &&	
 			currentFlow->flowHeader.portSrc == flow.portSrc &&
 			currentFlow->flowHeader.portDst == flow.portDst &&
-			currentFlow->flowHeader.protocol == flow.protocol
+			currentFlow->flowHeader.protocol == flow.protocol)
 				)
 		{
 			*(find) = true;
+			*(direction) = FORWARD;
+			return currentFlow;
+		}
+		
+		if(	
+			(!(strcmp(currentFlow->flowHeader.ipSrc,flow.ipDst)) &&
+			!(strcmp(currentFlow->flowHeader.ipDst,flow.ipSrc)) &&	
+			currentFlow->flowHeader.portSrc == flow.portDst &&
+			currentFlow->flowHeader.portDst == flow.portSrc &&
+			currentFlow->flowHeader.protocol == flow.protocol)
+				)
+		{
+			*(find) = true;
+			*(direction) = BACKWARD;
 			return currentFlow;
 		}
 		currentFlow = currentFlow->next;
@@ -137,9 +151,9 @@ updateFlowFeaturesOTHER(flowID_t flow, const struct pcap_pkthdr *packet)
 {
 	flowList_t *flowEntry;
 	bool find;
-
+	char direction;
 	
-	flowEntry = findFlow(flow, &find);
+	flowEntry = findFlow(flow, &find, &direction);
 	
 	if(!find)
 		return erroEmptyPointer;
@@ -267,9 +281,9 @@ updateFlowFeaturesUDP(flowID_t flow, const struct pcap_pkthdr *packet, const str
 {
 	flowList_t *flowEntry;
 	bool find;
-
+	char direction;
 	
-	flowEntry = findFlow(flow, &find);
+	flowEntry = findFlow(flow, &find, &direction);
 	
 	if(!find)
 		return erroEmptyPointer;
@@ -399,9 +413,9 @@ updateFlowFeaturesTCP(flowID_t flow, const struct pcap_pkthdr *packet, const str
 {
 	flowList_t *flowEntry;
 	bool find;
-
+	char direction;
 	
-	flowEntry = findFlow(flow, &find);
+	flowEntry = findFlow(flow, &find, &direction);
 	
 	if(!find)
 		return erroEmptyPointer;
@@ -773,7 +787,8 @@ processPacket (u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *pack
 	time_t currentTime = pkthdr->ts.tv_sec*FIT_USEC + pkthdr->ts.tv_usec;
 
 	
-
+	
+	char direction;
 	flowID_t newFlow;
 
 	/* variable to check if the header is valid */	
@@ -849,7 +864,7 @@ processPacket (u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *pack
 		
 	
 		/* verifyes if the flows already exists */
-		findFlow(newFlow, &find);
+		findFlow(newFlow, &find, &direction);
 		
 		/* try to add the flow to the list */
 		if(!find)	
@@ -883,7 +898,7 @@ processPacket (u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *pack
 		newFlow.protocol = 17;
 			
 
-		findFlow(newFlow, &find);
+		findFlow(newFlow, &find, &direction);
 		
 		/* try to add the flow to the list */
 		if(!find)	
@@ -910,7 +925,7 @@ processPacket (u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *pack
 	newFlow.protocol = 1;
 		
 
-	findFlow(newFlow, &find);
+	findFlow(newFlow, &find, &direction);
 	
 	/* try to add the flow to the list */
 	if(!find)	

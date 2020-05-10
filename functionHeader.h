@@ -12,7 +12,7 @@ void saveAllFlows(void);
 void copyHeader(flowID_t,flowID_t);
 void copyFeatures(flowFeatures_t,flowFeatures_t);
 
-flowList_t *findFlow(flowID_t , bool *);
+flowList_t *findFlow(flowID_t , bool *, char *);
 
 
 
