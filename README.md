@@ -1,31 +1,31 @@
 # pkt2flow
 This tools transform a packet input in a flow output based on the 5-tuple
 
-Configuration
+## Configuration
 
 In the file configuration.h is possible to set the abstraction configuration before compiling the code
 
 
-Instalation
+## Instalation
 
 	sudo apt install libpcap0.8-dev
 
 	gcc -Wall -o pkt2flow pkt2flow.c -lpcap -lm
 
-Execution
+## Execution
 
 ./pkt2flow [pcap-file]
 
 For live capture, do not set pcap-file option
 
-Testing
+## Testing
 
 Execute the code with the dataset/sample.pcap 
 
 The output must be equal to the sample.csv file
 
 
-Features
+# Features
 
 
 	bpf_u_int32 flowSize;			/* total flow size in bytes */
