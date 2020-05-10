@@ -8,8 +8,9 @@ In the file configuration.h is possible to set the abstraction configuration bef
 
 Instalation
 
-sudo apt install libpcap0.8-dev
-gcc -Wall -o pkt2flow pkt2flow.c -lpcap -lm
+	sudo apt install libpcap0.8-dev
+
+	gcc -Wall -o pkt2flow pkt2flow.c -lpcap -lm
 
 Execution
 
