@@ -99,12 +99,13 @@ flowAdd(flowID_t flow)
 		/* get flow header */
 		strcpy(LIST_FIRST->flowHeader.ipSrc,flow.ipSrc);
 		strcpy(LIST_FIRST->flowHeader.ipDst,flow.ipDst);
-		LIST_FIRST->flowHeader.portSrc 		= flow.portSrc;
-		LIST_FIRST->flowHeader.portDst 		= flow.portDst;
-		LIST_FIRST->flowHeader.protocol 	= flow.protocol;
-		LIST_FIRST->flowHeader.time 		= flow.time;
-		LIST_FIRST->active 			= false;
-		empty 					= false;
+		LIST_FIRST->flowHeader.portSrc 			= flow.portSrc;
+		LIST_FIRST->flowHeader.portDst 			= flow.portDst;
+		LIST_FIRST->flowHeader.protocol 		= flow.protocol;
+		LIST_FIRST->flowHeader.time 			= flow.time;
+		LIST_FIRST->flowFeatures.totalForwardPackets	= 0;	
+		LIST_FIRST->flowFeatures.totalBackwardPackets	= 0;	
+		empty 						= false;
 		
 		/* set the timer */
 		timer = flow.time;
@@ -113,7 +114,6 @@ flowAdd(flowID_t flow)
 		newEntry = (flowList_t *)(malloc(sizeof(flowList_t)));
 		newEntry->last 		= LIST_FIRST;
 		newEntry->next 		= NULL;
-		newEntry->active 	= true;
 		LIST_LAST 		= newEntry;
 		LIST_FIRST->next 	= LIST_LAST;
 		return ok;
@@ -124,11 +124,12 @@ flowAdd(flowID_t flow)
 	/* get flow header */
 	strcpy(LIST_LAST->flowHeader.ipSrc,flow.ipSrc);
 	strcpy(LIST_LAST->flowHeader.ipDst,flow.ipDst);
-	LIST_LAST->flowHeader.portSrc 		= flow.portSrc;
-	LIST_LAST->flowHeader.portDst 		= flow.portDst;
-	LIST_LAST->flowHeader.protocol 		= flow.protocol;
-	LIST_LAST->flowHeader.time 		= flow.time;
-	LIST_LAST->active			= false;	
+	LIST_LAST->flowHeader.portSrc 			= flow.portSrc;
+	LIST_LAST->flowHeader.portDst 			= flow.portDst;
+	LIST_LAST->flowHeader.protocol 			= flow.protocol;
+	LIST_LAST->flowHeader.time 			= flow.time;
+	LIST_LAST->flowFeatures.totalForwardPackets	= 0;	
+	LIST_LAST->flowFeatures.totalBackwardPackets	= 0;	
 
 	/* allocate the next element */
 	newEntry = (flowList_t *)(malloc(sizeof(flowList_t)));
@@ -136,7 +137,6 @@ flowAdd(flowID_t flow)
 	newEntry->next 		= NULL;
 	newEntry->flowHeader.ipSrc[0] = '\0';
 	newEntry->flowHeader.ipDst[0] = '\0';
-	newEntry->active 	= true;
 	LIST_LAST->next 	= newEntry;
 	LIST_LAST 		= newEntry;
 	return ok;
@@ -149,6 +149,7 @@ flowAdd(flowID_t flow)
 int 
 updateFlowFeaturesOTHER(flowID_t flow, const struct pcap_pkthdr *packet)
 {
+
 	flowList_t *flowEntry;
 	bool find;
 	char direction;
@@ -159,126 +160,263 @@ updateFlowFeaturesOTHER(flowID_t flow, const struct pcap_pkthdr *packet)
 		return erroEmptyPointer;
 
 
+	if(direction == FORWARD)
+	{
+		/* verify if it is the first packet of the flow to add the time */
+		if(!flowEntry->flowFeatures.totalForwardPackets)
+		{
+
+
+
+			/* initialize ip features */
+			flowEntry->flowFeatures.firstForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.lastForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.flowForwardSize 	= packet->len;
+			flowEntry->flowFeatures.smallestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.largestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.minForwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+			flowEntry->flowFeatures.maxForwardTimePacket 	= 0;			
+			flowEntry->flowFeatures.meanForwardTimePacket	= 0;			
+			flowEntry->flowFeatures.stdForwardTimePacket 	= 0;
+			flowEntry->flowFeatures.stdForwardPacketSize 	= 0;
+			flowEntry->flowFeatures.meanForwardPacketSize 	= packet->len;
+			flowEntry->flowFeatures.totalForwardPackets 	= 1;
+			
+			
+			/* set tcp features in 0 */
+			flowEntry->flowFeatures.totalForwardFIN 	=  0;
+			flowEntry->flowFeatures.totalForwardSYN 	=  0;
+			flowEntry->flowFeatures.totalForwardRST 	=  0;
+			flowEntry->flowFeatures.totalForwardPUSH 	=  0;
+			flowEntry->flowFeatures.totalForwardACK		=  0;
+			flowEntry->flowFeatures.totalForwardURG 	=  0;
+			flowEntry->flowFeatures.totalForwardECE 	=  0;
+			flowEntry->flowFeatures.totalForwardCWR 	=  0;
+					
+			return ok;
+			
+
+		}
+		
+		/* calcule metricts for other cases */
+		long int totalPkt = flowEntry->flowFeatures.totalForwardPackets; 
+		double timeElapsed;
+
+		/* second packet needs special process of mean and standart deviation */
+		if(flowEntry->flowFeatures.totalForwardPackets == 1)
+		{
+			/* time between two consecutives packets */
+			timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;
+
+			flowEntry->flowFeatures.lastForwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		
+			flowEntry->flowFeatures.meanForwardPacketSize = (packet->len + 
+									flowEntry->flowFeatures.meanForwardPacketSize)/2.0;
+
+			flowEntry->flowFeatures.stdForwardPacketSize = sqrt((pow(packet->len - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2)+
+									pow(flowEntry->flowFeatures.smallestForwardPacket - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2))/2.0);
+					
+
+			/* initialize time features */
+			flowEntry->flowFeatures.meanForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.stdForwardTimePacket = 0.0;
+			flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+
+
+		
+			if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+				flowEntry->flowFeatures.largestForwardPacket = packet->len;
+			if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+				flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+			
+				
+			flowEntry->flowFeatures.totalForwardPackets++;
+			flowEntry->flowFeatures.flowForwardSize += packet->len;
+			
+			return ok;		
+		}
+
+
+		/**************************************** update features for other packets ******************************************/
+		
+		/* time between two consecutives packets in microseconds */
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;	
+
+
+		flowEntry->flowFeatures.stdForwardPacketSize = sqrt((
+					flowEntry->flowFeatures.stdForwardPacketSize+(totalPkt/(totalPkt+1.0))*
+					pow(packet->len-flowEntry->flowFeatures.meanForwardPacketSize,2))/totalPkt);
+
+		flowEntry->flowFeatures.meanForwardPacketSize = (packet->len+
+								(flowEntry->flowFeatures.meanForwardPacketSize * 
+								 totalPkt))/(totalPkt+1.0);
+
+
+		flowEntry->flowFeatures.stdForwardTimePacket = sqrt((
+					flowEntry->flowFeatures.stdForwardTimePacket + (totalPkt/(totalPkt+1.0))*
+					pow(timeElapsed - flowEntry->flowFeatures.meanForwardTimePacket,2))/totalPkt);
+
+		
+
+		flowEntry->flowFeatures.meanForwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanForwardTimePacket * 
+							totalPkt))/(totalPkt+1.0);
+		
+		/* largest and smallest time and size features */
+		if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+			flowEntry->flowFeatures.largestForwardPacket = packet->len;
+
+		if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+
+		if(timeElapsed > flowEntry->flowFeatures.maxForwardTimePacket)
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+
+		if(timeElapsed < flowEntry->flowFeatures.minForwardTimePacket)
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+
+
+
+		flowEntry->flowFeatures.totalForwardPackets++;
+		flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowForwardSize += packet->len;
+		
+		return ok;
+	}
 
 	/* verify if it is the first packet of the flow to add the time */
-	if(!flowEntry->active)
+	if(!flowEntry->flowFeatures.totalBackwardPackets)
 	{
+
+
+
 		/* initialize ip features */
-		flowEntry->flowFeatures.firstTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.lastTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.flowSize 	= packet->len;
-		flowEntry->flowFeatures.smallestPacket 	= packet->len;
-		flowEntry->flowFeatures.largestPacket 	= packet->len;
-		flowEntry->flowFeatures.minTimePacket 	= FIT_USEC*WINDOW_SIZE;			
-		flowEntry->flowFeatures.maxTimePacket 	= 0;			
-		flowEntry->flowFeatures.meanTimePacket	= 0;			
-		flowEntry->flowFeatures.stdTimePacket 	= 0;
-		flowEntry->flowFeatures.stdPacketSize 	= 0;
-		flowEntry->flowFeatures.meanPacketSize 	= packet->len;
-		flowEntry->flowFeatures.totalPackets 	= 1;
+		flowEntry->flowFeatures.firstBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowBackwardSize 	= packet->len;
+		flowEntry->flowFeatures.smallestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.largestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.minBackwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+		flowEntry->flowFeatures.maxBackwardTimePacket 	= 0;			
+		flowEntry->flowFeatures.meanBackwardTimePacket	= 0;			
+		flowEntry->flowFeatures.stdBackwardTimePacket 	= 0;
+		flowEntry->flowFeatures.stdBackwardPacketSize 	= 0;
+		flowEntry->flowFeatures.meanBackwardPacketSize 	= packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets 	= 1;
 		
 		
 		/* set tcp features in 0 */
-		flowEntry->flowFeatures.totalFIN 	=  0;
-		flowEntry->flowFeatures.totalSYN 	=  0;
-		flowEntry->flowFeatures.totalRST 	=  0;
-		flowEntry->flowFeatures.totalPUSH 	=  0;
-		flowEntry->flowFeatures.totalACK	=  0;
-		flowEntry->flowFeatures.totalURG 	=  0;
-		flowEntry->flowFeatures.totalECE 	=  0;
-		flowEntry->flowFeatures.totalCWR 	=  0;
-			
-		flowEntry->active			= true;	
-
+		flowEntry->flowFeatures.totalBackwardFIN 	=  0;
+		flowEntry->flowFeatures.totalBackwardSYN 	=  0;
+		flowEntry->flowFeatures.totalBackwardRST 	=  0;
+		flowEntry->flowFeatures.totalBackwardPUSH 	=  0;
+		flowEntry->flowFeatures.totalBackwardACK	=  0;
+		flowEntry->flowFeatures.totalBackwardURG 	=  0;
+		flowEntry->flowFeatures.totalBackwardECE 	=  0;
+		flowEntry->flowFeatures.totalBackwardCWR 	=  0;
+				
 		return ok;
 		
 
 	}
 	
 	/* calcule metricts for other cases */
-	long int totalPkt = flowEntry->flowFeatures.totalPackets; 
+	long int totalPkt = flowEntry->flowFeatures.totalBackwardPackets; 
 	double timeElapsed;
 
 	/* second packet needs special process of mean and standart deviation */
-	if(flowEntry->flowFeatures.totalPackets == 1)
+	if(flowEntry->flowFeatures.totalBackwardPackets == 1)
 	{
 		/* time between two consecutives packets */
-		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;
 
-		flowEntry->flowFeatures.lastTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 	
-		flowEntry->flowFeatures.meanPacketSize = (packet->len + flowEntry->flowFeatures.meanPacketSize)/2.0;
+		flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len + 
+								flowEntry->flowFeatures.meanBackwardPacketSize)/2.0;
 
-		flowEntry->flowFeatures.stdPacketSize = sqrt((pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2)+
-			pow(flowEntry->flowFeatures.smallestPacket - flowEntry->flowFeatures.meanPacketSize,2))/2.0);
+		flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((pow(packet->len - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2)+
+								pow(flowEntry->flowFeatures.smallestBackwardPacket - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2))/2.0);
 				
 
 		/* initialize time features */
-		flowEntry->flowFeatures.meanTimePacket = timeElapsed;
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
-		flowEntry->flowFeatures.stdTimePacket = 0.0;
-		flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.meanBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.stdBackwardTimePacket = 0.0;
+		flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 
 
 	
-		if(flowEntry->flowFeatures.largestPacket < packet->len)
-			flowEntry->flowFeatures.largestPacket = packet->len;
-		if(flowEntry->flowFeatures.smallestPacket > packet->len)
-			flowEntry->flowFeatures.smallestPacket = packet->len;
+		if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+			flowEntry->flowFeatures.largestBackwardPacket = packet->len;
+		if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 		
 			
-		flowEntry->flowFeatures.totalPackets++;
-		flowEntry->flowFeatures.flowSize += packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets++;
+		flowEntry->flowFeatures.flowBackwardSize += packet->len;
 		
 		return ok;		
 	}
 
 
-	/**************************************** update features for other packets **********************************************/
+	/**************************************** update features for other packets ******************************************/
 	
 	/* time between two consecutives packets in microseconds */
-	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;	
+	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;	
 
 
-	flowEntry->flowFeatures.stdPacketSize = sqrt((
-				flowEntry->flowFeatures.stdPacketSize+(totalPkt/(totalPkt+1.0))*
-				pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((
+				flowEntry->flowFeatures.stdBackwardPacketSize+(totalPkt/(totalPkt+1.0))*
+				pow(packet->len-flowEntry->flowFeatures.meanBackwardPacketSize,2))/totalPkt);
 
-	flowEntry->flowFeatures.meanPacketSize = (packet->len+(flowEntry->flowFeatures.meanPacketSize * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len+
+							(flowEntry->flowFeatures.meanBackwardPacketSize * 
+							 totalPkt))/(totalPkt+1.0);
 
 
-	flowEntry->flowFeatures.stdTimePacket = sqrt((
-				flowEntry->flowFeatures.stdTimePacket + (totalPkt/(totalPkt+1.0))*
-				pow(timeElapsed - flowEntry->flowFeatures.meanTimePacket,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardTimePacket = sqrt((
+				flowEntry->flowFeatures.stdBackwardTimePacket + (totalPkt/(totalPkt+1.0))*
+				pow(timeElapsed - flowEntry->flowFeatures.meanBackwardTimePacket,2))/totalPkt);
 
 	
 
-	flowEntry->flowFeatures.meanTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanTimePacket * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanBackwardTimePacket * 
+						totalPkt))/(totalPkt+1.0);
 	
 	/* largest and smallest time and size features */
-	if(flowEntry->flowFeatures.largestPacket < packet->len)
-		flowEntry->flowFeatures.largestPacket = packet->len;
+	if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+		flowEntry->flowFeatures.largestBackwardPacket = packet->len;
 
-	if(flowEntry->flowFeatures.smallestPacket > packet->len)
-		flowEntry->flowFeatures.smallestPacket = packet->len;
+	if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+		flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 
-	if(timeElapsed > flowEntry->flowFeatures.maxTimePacket)
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
+	if(timeElapsed > flowEntry->flowFeatures.maxBackwardTimePacket)
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
 
-	if(timeElapsed < flowEntry->flowFeatures.minTimePacket)
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
+	if(timeElapsed < flowEntry->flowFeatures.minBackwardTimePacket)
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
 
 
-	flowEntry->flowFeatures.totalPackets++;
-	flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-	flowEntry->flowFeatures.flowSize += packet->len;
+	flowEntry->flowFeatures.totalBackwardPackets++;
+	flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+	flowEntry->flowFeatures.flowBackwardSize += packet->len;
+	
 	return ok;
 
 }
+
+
 int 
 updateFlowFeaturesUDP(flowID_t flow, const struct pcap_pkthdr *packet, const struct sniff_udp *udp)
 {
+		
 	flowList_t *flowEntry;
 	bool find;
 	char direction;
@@ -289,123 +427,264 @@ updateFlowFeaturesUDP(flowID_t flow, const struct pcap_pkthdr *packet, const str
 		return erroEmptyPointer;
 
 
+	if(direction == FORWARD)
+	{
+		/* verify if it is the first packet of the flow to add the time */
+		if(!flowEntry->flowFeatures.totalForwardPackets)
+		{
+
+
+
+			/* initialize ip features */
+			flowEntry->flowFeatures.firstForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.lastForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.flowForwardSize 	= packet->len;
+			flowEntry->flowFeatures.smallestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.largestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.minForwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+			flowEntry->flowFeatures.maxForwardTimePacket 	= 0;			
+			flowEntry->flowFeatures.meanForwardTimePacket	= 0;			
+			flowEntry->flowFeatures.stdForwardTimePacket 	= 0;
+			flowEntry->flowFeatures.stdForwardPacketSize 	= 0;
+			flowEntry->flowFeatures.meanForwardPacketSize 	= packet->len;
+			flowEntry->flowFeatures.totalForwardPackets 	= 1;
+			
+			
+			/* set tcp features in 0 */
+			flowEntry->flowFeatures.totalForwardFIN 	=  0;
+			flowEntry->flowFeatures.totalForwardSYN 	=  0;
+			flowEntry->flowFeatures.totalForwardRST 	=  0;
+			flowEntry->flowFeatures.totalForwardPUSH 	=  0;
+			flowEntry->flowFeatures.totalForwardACK		=  0;
+			flowEntry->flowFeatures.totalForwardURG 	=  0;
+			flowEntry->flowFeatures.totalForwardECE 	=  0;
+			flowEntry->flowFeatures.totalForwardCWR 	=  0;
+					
+			return ok;
+			
+
+		}
+		
+		/* calcule metricts for other cases */
+		long int totalPkt = flowEntry->flowFeatures.totalForwardPackets; 
+		double timeElapsed;
+
+		/* second packet needs special process of mean and standart deviation */
+		if(flowEntry->flowFeatures.totalForwardPackets == 1)
+		{
+			/* time between two consecutives packets */
+			timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;
+
+			flowEntry->flowFeatures.lastForwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		
+			flowEntry->flowFeatures.meanForwardPacketSize = (packet->len + 
+									flowEntry->flowFeatures.meanForwardPacketSize)/2.0;
+
+			flowEntry->flowFeatures.stdForwardPacketSize = sqrt((pow(packet->len - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2)+
+									pow(flowEntry->flowFeatures.smallestForwardPacket - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2))/2.0);
+					
+
+			/* initialize time features */
+			flowEntry->flowFeatures.meanForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.stdForwardTimePacket = 0.0;
+			flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+
+		
+			if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+				flowEntry->flowFeatures.largestForwardPacket = packet->len;
+			if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+				flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+			
+				
+			flowEntry->flowFeatures.totalForwardPackets++;
+			flowEntry->flowFeatures.flowForwardSize += packet->len;
+			
+			return ok;		
+		}
+
+
+		/**************************************** update features for other packets ******************************************/
+		
+		/* time between two consecutives packets in microseconds */
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;	
+
+
+		flowEntry->flowFeatures.stdForwardPacketSize = sqrt((
+					flowEntry->flowFeatures.stdForwardPacketSize+(totalPkt/(totalPkt+1.0))*
+					pow(packet->len-flowEntry->flowFeatures.meanForwardPacketSize,2))/totalPkt);
+
+		flowEntry->flowFeatures.meanForwardPacketSize = (packet->len+
+								(flowEntry->flowFeatures.meanForwardPacketSize * 
+								 totalPkt))/(totalPkt+1.0);
+
+
+		flowEntry->flowFeatures.stdForwardTimePacket = sqrt((
+					flowEntry->flowFeatures.stdForwardTimePacket + (totalPkt/(totalPkt+1.0))*
+					pow(timeElapsed - flowEntry->flowFeatures.meanForwardTimePacket,2))/totalPkt);
+
+		
+
+		flowEntry->flowFeatures.meanForwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanForwardTimePacket * 
+							totalPkt))/(totalPkt+1.0);
+		
+		/* largest and smallest time and size features */
+		if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+			flowEntry->flowFeatures.largestForwardPacket = packet->len;
+
+		if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+
+		if(timeElapsed > flowEntry->flowFeatures.maxForwardTimePacket)
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+
+		if(timeElapsed < flowEntry->flowFeatures.minForwardTimePacket)
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+
+
+
+
+		flowEntry->flowFeatures.totalForwardPackets++;
+		flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowForwardSize += packet->len;
+		
+		return ok;
+	}
 
 	/* verify if it is the first packet of the flow to add the time */
-	if(!flowEntry->active)
+	if(!flowEntry->flowFeatures.totalBackwardPackets)
 	{
+
+
+
 		/* initialize ip features */
-		flowEntry->flowFeatures.firstTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.lastTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.flowSize 	= packet->len;
-		flowEntry->flowFeatures.smallestPacket 	= packet->len;
-		flowEntry->flowFeatures.largestPacket 	= packet->len;
-		flowEntry->flowFeatures.minTimePacket 	= FIT_USEC*WINDOW_SIZE;			
-		flowEntry->flowFeatures.maxTimePacket 	= 0;			
-		flowEntry->flowFeatures.meanTimePacket	= 0;			
-		flowEntry->flowFeatures.stdTimePacket 	= 0;
-		flowEntry->flowFeatures.stdPacketSize 	= 0;
-		flowEntry->flowFeatures.meanPacketSize 	= packet->len;
-		flowEntry->flowFeatures.totalPackets 	= 1;
+		flowEntry->flowFeatures.firstBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowBackwardSize 	= packet->len;
+		flowEntry->flowFeatures.smallestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.largestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.minBackwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+		flowEntry->flowFeatures.maxBackwardTimePacket 	= 0;			
+		flowEntry->flowFeatures.meanBackwardTimePacket	= 0;			
+		flowEntry->flowFeatures.stdBackwardTimePacket 	= 0;
+		flowEntry->flowFeatures.stdBackwardPacketSize 	= 0;
+		flowEntry->flowFeatures.meanBackwardPacketSize 	= packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets 	= 1;
 		
 		
 		/* set tcp features in 0 */
-		flowEntry->flowFeatures.totalFIN 	=  0;
-		flowEntry->flowFeatures.totalSYN 	=  0;
-		flowEntry->flowFeatures.totalRST 	=  0;
-		flowEntry->flowFeatures.totalPUSH 	=  0;
-		flowEntry->flowFeatures.totalACK	=  0;
-		flowEntry->flowFeatures.totalURG 	=  0;
-		flowEntry->flowFeatures.totalECE 	=  0;
-		flowEntry->flowFeatures.totalCWR 	=  0;
-			
-		flowEntry->active			= true;	
-
+		flowEntry->flowFeatures.totalBackwardFIN 	=  0;
+		flowEntry->flowFeatures.totalBackwardSYN 	=  0;
+		flowEntry->flowFeatures.totalBackwardRST 	=  0;
+		flowEntry->flowFeatures.totalBackwardPUSH 	=  0;
+		flowEntry->flowFeatures.totalBackwardACK	=  0;
+		flowEntry->flowFeatures.totalBackwardURG 	=  0;
+		flowEntry->flowFeatures.totalBackwardECE 	=  0;
+		flowEntry->flowFeatures.totalBackwardCWR 	=  0;
+				
 		return ok;
 		
 
 	}
 	
 	/* calcule metricts for other cases */
-	long int totalPkt = flowEntry->flowFeatures.totalPackets; 
+	long int totalPkt = flowEntry->flowFeatures.totalBackwardPackets; 
 	double timeElapsed;
 
 	/* second packet needs special process of mean and standart deviation */
-	if(flowEntry->flowFeatures.totalPackets == 1)
+	if(flowEntry->flowFeatures.totalBackwardPackets == 1)
 	{
 		/* time between two consecutives packets */
-		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;
 
-		flowEntry->flowFeatures.lastTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 	
-		flowEntry->flowFeatures.meanPacketSize = (packet->len + flowEntry->flowFeatures.meanPacketSize)/2.0;
+		flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len + 
+								flowEntry->flowFeatures.meanBackwardPacketSize)/2.0;
 
-		flowEntry->flowFeatures.stdPacketSize = sqrt((pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2)+
-			pow(flowEntry->flowFeatures.smallestPacket - flowEntry->flowFeatures.meanPacketSize,2))/2.0);
+		flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((pow(packet->len - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2)+
+								pow(flowEntry->flowFeatures.smallestBackwardPacket - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2))/2.0);
 				
 
 		/* initialize time features */
-		flowEntry->flowFeatures.meanTimePacket = timeElapsed;
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
-		flowEntry->flowFeatures.stdTimePacket = 0.0;
-		flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.meanBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.stdBackwardTimePacket = 0.0;
+		flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 
+		/* tcp flags */
 
 	
-		if(flowEntry->flowFeatures.largestPacket < packet->len)
-			flowEntry->flowFeatures.largestPacket = packet->len;
-		if(flowEntry->flowFeatures.smallestPacket > packet->len)
-			flowEntry->flowFeatures.smallestPacket = packet->len;
+		if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+			flowEntry->flowFeatures.largestBackwardPacket = packet->len;
+		if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 		
 			
-		flowEntry->flowFeatures.totalPackets++;
-		flowEntry->flowFeatures.flowSize += packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets++;
+		flowEntry->flowFeatures.flowBackwardSize += packet->len;
 		
 		return ok;		
 	}
 
 
-	/**************************************** update features for other packets **********************************************/
+	/**************************************** update features for other packets ******************************************/
 	
 	/* time between two consecutives packets in microseconds */
-	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;	
+	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;	
 
 
-	flowEntry->flowFeatures.stdPacketSize = sqrt((
-				flowEntry->flowFeatures.stdPacketSize+(totalPkt/(totalPkt+1.0))*
-				pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((
+				flowEntry->flowFeatures.stdBackwardPacketSize+(totalPkt/(totalPkt+1.0))*
+				pow(packet->len-flowEntry->flowFeatures.meanBackwardPacketSize,2))/totalPkt);
 
-	flowEntry->flowFeatures.meanPacketSize = (packet->len+(flowEntry->flowFeatures.meanPacketSize * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len+
+							(flowEntry->flowFeatures.meanBackwardPacketSize * 
+							 totalPkt))/(totalPkt+1.0);
 
 
-	flowEntry->flowFeatures.stdTimePacket = sqrt((
-				flowEntry->flowFeatures.stdTimePacket + (totalPkt/(totalPkt+1.0))*
-				pow(timeElapsed - flowEntry->flowFeatures.meanTimePacket,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardTimePacket = sqrt((
+				flowEntry->flowFeatures.stdBackwardTimePacket + (totalPkt/(totalPkt+1.0))*
+				pow(timeElapsed - flowEntry->flowFeatures.meanBackwardTimePacket,2))/totalPkt);
 
 	
 
-	flowEntry->flowFeatures.meanTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanTimePacket * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanBackwardTimePacket * 
+						totalPkt))/(totalPkt+1.0);
 	
 	/* largest and smallest time and size features */
-	if(flowEntry->flowFeatures.largestPacket < packet->len)
-		flowEntry->flowFeatures.largestPacket = packet->len;
+	if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+		flowEntry->flowFeatures.largestBackwardPacket = packet->len;
 
-	if(flowEntry->flowFeatures.smallestPacket > packet->len)
-		flowEntry->flowFeatures.smallestPacket = packet->len;
+	if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+		flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 
-	if(timeElapsed > flowEntry->flowFeatures.maxTimePacket)
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
+	if(timeElapsed > flowEntry->flowFeatures.maxBackwardTimePacket)
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
 
-	if(timeElapsed < flowEntry->flowFeatures.minTimePacket)
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
+	if(timeElapsed < flowEntry->flowFeatures.minBackwardTimePacket)
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
 
 
-	flowEntry->flowFeatures.totalPackets++;
-	flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-	flowEntry->flowFeatures.flowSize += packet->len;
+
+
+
+	flowEntry->flowFeatures.totalBackwardPackets++;
+	flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+	flowEntry->flowFeatures.flowBackwardSize += packet->len;
+	
 	return ok;
 
+		
+
 }
+			
 
 
 int 
@@ -421,40 +700,199 @@ updateFlowFeaturesTCP(flowID_t flow, const struct pcap_pkthdr *packet, const str
 		return erroEmptyPointer;
 
 
+	if(direction == FORWARD)
+	{
+		/* verify if it is the first packet of the flow to add the time */
+		if(!flowEntry->flowFeatures.totalForwardPackets)
+		{
+
+
+
+			/* initialize ip features */
+			flowEntry->flowFeatures.firstForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.lastForwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+			flowEntry->flowFeatures.flowForwardSize 	= packet->len;
+			flowEntry->flowFeatures.smallestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.largestForwardPacket 	= packet->len;
+			flowEntry->flowFeatures.minForwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+			flowEntry->flowFeatures.maxForwardTimePacket 	= 0;			
+			flowEntry->flowFeatures.meanForwardTimePacket	= 0;			
+			flowEntry->flowFeatures.stdForwardTimePacket 	= 0;
+			flowEntry->flowFeatures.stdForwardPacketSize 	= 0;
+			flowEntry->flowFeatures.meanForwardPacketSize 	= packet->len;
+			flowEntry->flowFeatures.totalForwardPackets 	= 1;
+			
+			
+			/* initialize tcp features */
+			flowEntry->flowFeatures.totalForwardFIN 	= (TH_FIN & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardSYN 	= (TH_SYN & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardRST 	= (TH_RST & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardPUSH 	= (TH_PUSH & tcp->th_flags)? 1 : 0;
+			flowEntry->flowFeatures.totalForwardACK		= (TH_ACK & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardURG 	= (TH_URG & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardECE 	= (TH_ECE & tcp->th_flags) ? 1 : 0;
+			flowEntry->flowFeatures.totalForwardCWR 	= (TH_CWR & tcp->th_flags) ? 1 : 0;
+					
+			return ok;
+			
+
+		}
+		
+		/* calcule metricts for other cases */
+		long int totalPkt = flowEntry->flowFeatures.totalForwardPackets; 
+		double timeElapsed;
+
+		/* second packet needs special process of mean and standart deviation */
+		if(flowEntry->flowFeatures.totalForwardPackets == 1)
+		{
+			/* time between two consecutives packets */
+			timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;
+
+			flowEntry->flowFeatures.lastForwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		
+			flowEntry->flowFeatures.meanForwardPacketSize = (packet->len + 
+									flowEntry->flowFeatures.meanForwardPacketSize)/2.0;
+
+			flowEntry->flowFeatures.stdForwardPacketSize = sqrt((pow(packet->len - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2)+
+									pow(flowEntry->flowFeatures.smallestForwardPacket - 
+									flowEntry->flowFeatures.meanForwardPacketSize,2))/2.0);
+					
+
+			/* initialize time features */
+			flowEntry->flowFeatures.meanForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+			flowEntry->flowFeatures.stdForwardTimePacket = 0.0;
+			flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+
+			/* tcp flags */
+			if(TH_FIN & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardFIN++;
+			if(TH_SYN & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardSYN++;
+			if(TH_RST & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardRST++;
+			if(TH_PUSH & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardPUSH++;
+			if(TH_ACK & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardACK++;
+			if(TH_URG & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardURG++;
+			if(TH_ECE & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardECE++;
+			if(TH_CWR & tcp->th_flags)
+				flowEntry->flowFeatures.totalForwardCWR++;
+
+		
+			if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+				flowEntry->flowFeatures.largestForwardPacket = packet->len;
+			if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+				flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+			
+				
+			flowEntry->flowFeatures.totalForwardPackets++;
+			flowEntry->flowFeatures.flowForwardSize += packet->len;
+			
+			return ok;		
+		}
+
+
+		/**************************************** update features for other packets ******************************************/
+		
+		/* time between two consecutives packets in microseconds */
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastForwardTime;	
+
+
+		flowEntry->flowFeatures.stdForwardPacketSize = sqrt((
+					flowEntry->flowFeatures.stdForwardPacketSize+(totalPkt/(totalPkt+1.0))*
+					pow(packet->len-flowEntry->flowFeatures.meanForwardPacketSize,2))/totalPkt);
+
+		flowEntry->flowFeatures.meanForwardPacketSize = (packet->len+
+								(flowEntry->flowFeatures.meanForwardPacketSize * 
+								 totalPkt))/(totalPkt+1.0);
+
+
+		flowEntry->flowFeatures.stdForwardTimePacket = sqrt((
+					flowEntry->flowFeatures.stdForwardTimePacket + (totalPkt/(totalPkt+1.0))*
+					pow(timeElapsed - flowEntry->flowFeatures.meanForwardTimePacket,2))/totalPkt);
+
+		
+
+		flowEntry->flowFeatures.meanForwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanForwardTimePacket * 
+							totalPkt))/(totalPkt+1.0);
+		
+		/* largest and smallest time and size features */
+		if(flowEntry->flowFeatures.largestForwardPacket < packet->len)
+			flowEntry->flowFeatures.largestForwardPacket = packet->len;
+
+		if(flowEntry->flowFeatures.smallestForwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestForwardPacket = packet->len;
+
+		if(timeElapsed > flowEntry->flowFeatures.maxForwardTimePacket)
+			flowEntry->flowFeatures.maxForwardTimePacket = timeElapsed;
+
+		if(timeElapsed < flowEntry->flowFeatures.minForwardTimePacket)
+			flowEntry->flowFeatures.minForwardTimePacket = timeElapsed;
+
+
+		/* tcp flags */
+		if(TH_FIN & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardFIN++;
+		if(TH_SYN & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardSYN++;
+		if(TH_RST & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardRST++;
+		if(TH_PUSH & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardPUSH++;
+		if(TH_ACK & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardACK++;
+		if(TH_URG & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardURG++;
+		if(TH_ECE & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardECE++;
+		if(TH_CWR & tcp->th_flags)
+			flowEntry->flowFeatures.totalForwardCWR++;
+
+
+
+		flowEntry->flowFeatures.totalForwardPackets++;
+		flowEntry->flowFeatures.lastForwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowForwardSize += packet->len;
+		
+		return ok;
+	}
 
 	/* verify if it is the first packet of the flow to add the time */
-	if(!flowEntry->active)
+	if(!flowEntry->flowFeatures.totalBackwardPackets)
 	{
 
 
 
 		/* initialize ip features */
-		flowEntry->flowFeatures.firstTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.lastTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-		flowEntry->flowFeatures.flowSize 	= packet->len;
-		flowEntry->flowFeatures.smallestPacket 	= packet->len;
-		flowEntry->flowFeatures.largestPacket 	= packet->len;
-		flowEntry->flowFeatures.minTimePacket 	= FIT_USEC*WINDOW_SIZE;			
-		flowEntry->flowFeatures.maxTimePacket 	= 0;			
-		flowEntry->flowFeatures.meanTimePacket	= 0;			
-		flowEntry->flowFeatures.stdTimePacket 	= 0;
-		flowEntry->flowFeatures.stdPacketSize 	= 0;
-		flowEntry->flowFeatures.meanPacketSize 	= packet->len;
-		flowEntry->flowFeatures.totalPackets 	= 1;
+		flowEntry->flowFeatures.firstBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime 	= packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.flowBackwardSize 	= packet->len;
+		flowEntry->flowFeatures.smallestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.largestBackwardPacket 	= packet->len;
+		flowEntry->flowFeatures.minBackwardTimePacket 	= FIT_USEC*WINDOW_SIZE;			
+		flowEntry->flowFeatures.maxBackwardTimePacket 	= 0;			
+		flowEntry->flowFeatures.meanBackwardTimePacket	= 0;			
+		flowEntry->flowFeatures.stdBackwardTimePacket 	= 0;
+		flowEntry->flowFeatures.stdBackwardPacketSize 	= 0;
+		flowEntry->flowFeatures.meanBackwardPacketSize 	= packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets 	= 1;
 		
 		
 		/* initialize tcp features */
-		flowEntry->flowFeatures.totalFIN 	= (TH_FIN & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalSYN 	= (TH_SYN & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalRST 	= (TH_RST & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalPUSH 	= (TH_PUSH & tcp->th_flags)? 1 : 0;
-		flowEntry->flowFeatures.totalACK	= (TH_ACK & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalURG 	= (TH_URG & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalECE 	= (TH_ECE & tcp->th_flags) ? 1 : 0;
-		flowEntry->flowFeatures.totalCWR 	= (TH_CWR & tcp->th_flags) ? 1 : 0;
-			
-		
-		flowEntry->active			= true;	
+		flowEntry->flowFeatures.totalBackwardFIN 	= (TH_FIN & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardSYN 	= (TH_SYN & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardRST 	= (TH_RST & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardPUSH 	= (TH_PUSH & tcp->th_flags)? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardACK		= (TH_ACK & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardURG 	= (TH_URG & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardECE 	= (TH_ECE & tcp->th_flags) ? 1 : 0;
+		flowEntry->flowFeatures.totalBackwardCWR 	= (TH_CWR & tcp->th_flags) ? 1 : 0;
 				
 		return ok;
 		
@@ -462,122 +900,130 @@ updateFlowFeaturesTCP(flowID_t flow, const struct pcap_pkthdr *packet, const str
 	}
 	
 	/* calcule metricts for other cases */
-	long int totalPkt = flowEntry->flowFeatures.totalPackets; 
+	long int totalPkt = flowEntry->flowFeatures.totalBackwardPackets; 
 	double timeElapsed;
 
 	/* second packet needs special process of mean and standart deviation */
-	if(flowEntry->flowFeatures.totalPackets == 1)
+	if(flowEntry->flowFeatures.totalBackwardPackets == 1)
 	{
 		/* time between two consecutives packets */
-		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;
+		timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;
 
-		flowEntry->flowFeatures.lastTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.lastBackwardTime =  packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 	
-		flowEntry->flowFeatures.meanPacketSize = (packet->len + flowEntry->flowFeatures.meanPacketSize)/2.0;
+		flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len + 
+								flowEntry->flowFeatures.meanBackwardPacketSize)/2.0;
 
-		flowEntry->flowFeatures.stdPacketSize = sqrt((pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2)+
-			pow(flowEntry->flowFeatures.smallestPacket - flowEntry->flowFeatures.meanPacketSize,2))/2.0);
+		flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((pow(packet->len - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2)+
+								pow(flowEntry->flowFeatures.smallestBackwardPacket - 
+								flowEntry->flowFeatures.meanBackwardPacketSize,2))/2.0);
 				
 
 		/* initialize time features */
-		flowEntry->flowFeatures.meanTimePacket = timeElapsed;
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
-		flowEntry->flowFeatures.stdTimePacket = 0.0;
-		flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+		flowEntry->flowFeatures.meanBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
+		flowEntry->flowFeatures.stdBackwardTimePacket = 0.0;
+		flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
 
 		/* tcp flags */
 		if(TH_FIN & tcp->th_flags)
-			flowEntry->flowFeatures.totalFIN++;
+			flowEntry->flowFeatures.totalBackwardFIN++;
 		if(TH_SYN & tcp->th_flags)
-			flowEntry->flowFeatures.totalSYN++;
+			flowEntry->flowFeatures.totalBackwardSYN++;
 		if(TH_RST & tcp->th_flags)
-			flowEntry->flowFeatures.totalRST++;
+			flowEntry->flowFeatures.totalBackwardRST++;
 		if(TH_PUSH & tcp->th_flags)
-			flowEntry->flowFeatures.totalPUSH++;
+			flowEntry->flowFeatures.totalBackwardPUSH++;
 		if(TH_ACK & tcp->th_flags)
-			flowEntry->flowFeatures.totalACK++;
+			flowEntry->flowFeatures.totalBackwardACK++;
 		if(TH_URG & tcp->th_flags)
-			flowEntry->flowFeatures.totalURG++;
+			flowEntry->flowFeatures.totalBackwardURG++;
 		if(TH_ECE & tcp->th_flags)
-			flowEntry->flowFeatures.totalECE++;
+			flowEntry->flowFeatures.totalBackwardECE++;
 		if(TH_CWR & tcp->th_flags)
-			flowEntry->flowFeatures.totalCWR++;
+			flowEntry->flowFeatures.totalBackwardCWR++;
 
 	
-		if(flowEntry->flowFeatures.largestPacket < packet->len)
-			flowEntry->flowFeatures.largestPacket = packet->len;
-		if(flowEntry->flowFeatures.smallestPacket > packet->len)
-			flowEntry->flowFeatures.smallestPacket = packet->len;
+		if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+			flowEntry->flowFeatures.largestBackwardPacket = packet->len;
+		if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+			flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 		
 			
-		flowEntry->flowFeatures.totalPackets++;
-		flowEntry->flowFeatures.flowSize += packet->len;
+		flowEntry->flowFeatures.totalBackwardPackets++;
+		flowEntry->flowFeatures.flowBackwardSize += packet->len;
 		
 		return ok;		
 	}
 
 
-	/**************************************** update features for other packets **********************************************/
+	/**************************************** update features for other packets ******************************************/
 	
 	/* time between two consecutives packets in microseconds */
-	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastTime;	
+	timeElapsed = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec - flowEntry->flowFeatures.lastBackwardTime;	
 
 
-	flowEntry->flowFeatures.stdPacketSize = sqrt((
-				flowEntry->flowFeatures.stdPacketSize+(totalPkt/(totalPkt+1.0))*
-				pow(packet->len-flowEntry->flowFeatures.meanPacketSize,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardPacketSize = sqrt((
+				flowEntry->flowFeatures.stdBackwardPacketSize+(totalPkt/(totalPkt+1.0))*
+				pow(packet->len-flowEntry->flowFeatures.meanBackwardPacketSize,2))/totalPkt);
 
-	flowEntry->flowFeatures.meanPacketSize = (packet->len+(flowEntry->flowFeatures.meanPacketSize * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardPacketSize = (packet->len+
+							(flowEntry->flowFeatures.meanBackwardPacketSize * 
+							 totalPkt))/(totalPkt+1.0);
 
 
-	flowEntry->flowFeatures.stdTimePacket = sqrt((
-				flowEntry->flowFeatures.stdTimePacket + (totalPkt/(totalPkt+1.0))*
-				pow(timeElapsed - flowEntry->flowFeatures.meanTimePacket,2))/totalPkt);
+	flowEntry->flowFeatures.stdBackwardTimePacket = sqrt((
+				flowEntry->flowFeatures.stdBackwardTimePacket + (totalPkt/(totalPkt+1.0))*
+				pow(timeElapsed - flowEntry->flowFeatures.meanBackwardTimePacket,2))/totalPkt);
 
 	
 
-	flowEntry->flowFeatures.meanTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanTimePacket * totalPkt))/(totalPkt+1.0);
+	flowEntry->flowFeatures.meanBackwardTimePacket = (timeElapsed+(flowEntry->flowFeatures.meanBackwardTimePacket * 
+						totalPkt))/(totalPkt+1.0);
 	
 	/* largest and smallest time and size features */
-	if(flowEntry->flowFeatures.largestPacket < packet->len)
-		flowEntry->flowFeatures.largestPacket = packet->len;
+	if(flowEntry->flowFeatures.largestBackwardPacket < packet->len)
+		flowEntry->flowFeatures.largestBackwardPacket = packet->len;
 
-	if(flowEntry->flowFeatures.smallestPacket > packet->len)
-		flowEntry->flowFeatures.smallestPacket = packet->len;
+	if(flowEntry->flowFeatures.smallestBackwardPacket > packet->len)
+		flowEntry->flowFeatures.smallestBackwardPacket = packet->len;
 
-	if(timeElapsed > flowEntry->flowFeatures.maxTimePacket)
-		flowEntry->flowFeatures.maxTimePacket = timeElapsed;
+	if(timeElapsed > flowEntry->flowFeatures.maxBackwardTimePacket)
+		flowEntry->flowFeatures.maxBackwardTimePacket = timeElapsed;
 
-	if(timeElapsed < flowEntry->flowFeatures.minTimePacket)
-		flowEntry->flowFeatures.minTimePacket = timeElapsed;
+	if(timeElapsed < flowEntry->flowFeatures.minBackwardTimePacket)
+		flowEntry->flowFeatures.minBackwardTimePacket = timeElapsed;
 
 
 	/* tcp flags */
 	if(TH_FIN & tcp->th_flags)
-		flowEntry->flowFeatures.totalFIN++;
+		flowEntry->flowFeatures.totalBackwardFIN++;
 	if(TH_SYN & tcp->th_flags)
-		flowEntry->flowFeatures.totalSYN++;
+		flowEntry->flowFeatures.totalBackwardSYN++;
 	if(TH_RST & tcp->th_flags)
-		flowEntry->flowFeatures.totalRST++;
+		flowEntry->flowFeatures.totalBackwardRST++;
 	if(TH_PUSH & tcp->th_flags)
-		flowEntry->flowFeatures.totalPUSH++;
+		flowEntry->flowFeatures.totalBackwardPUSH++;
 	if(TH_ACK & tcp->th_flags)
-		flowEntry->flowFeatures.totalACK++;
+		flowEntry->flowFeatures.totalBackwardACK++;
 	if(TH_URG & tcp->th_flags)
-		flowEntry->flowFeatures.totalURG++;
+		flowEntry->flowFeatures.totalBackwardURG++;
 	if(TH_ECE & tcp->th_flags)
-		flowEntry->flowFeatures.totalECE++;
+		flowEntry->flowFeatures.totalBackwardECE++;
 	if(TH_CWR & tcp->th_flags)
-		flowEntry->flowFeatures.totalCWR++;
+		flowEntry->flowFeatures.totalBackwardCWR++;
 
 
 
-	flowEntry->flowFeatures.totalPackets++;
-	flowEntry->flowFeatures.lastTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
-	flowEntry->flowFeatures.flowSize += packet->len;
+	flowEntry->flowFeatures.totalBackwardPackets++;
+	flowEntry->flowFeatures.lastBackwardTime = packet->ts.tv_sec*FIT_USEC + packet->ts.tv_usec;
+	flowEntry->flowFeatures.flowBackwardSize += packet->len;
 	
 	return ok;
+
+		
 }
 
 
@@ -597,138 +1043,118 @@ saveAllFlows(void)
 	return;
 }
 
-void 
-printFlow(flowList_t *flow)
-{
-
-	flow->flowFeatures.totalTime = flow->flowFeatures.lastTime - flow->flowFeatures.firstTime;
-
-
-	/* save features */
-	printf("%s,%s,%u,%u,%u,%u,%u,%u,%u,%g,%g,%li,%li,%f,%g,%u,%u,%u,%u,%u,%u,%u,%u,%f\n",
-			flow->flowHeader.ipSrc,						/*  1 */
-			flow->flowHeader.ipDst,						/*  2 */
-			flow->flowHeader.portSrc,                                       /*  3 */
-			flow->flowHeader.portDst,                                       /*  4 */
-			flow->flowHeader.protocol,                                      /*  5 */ 
-			flow->flowFeatures.flowSize,                                    /*  6 */
-			flow->flowFeatures.totalPackets,                                /*  7 */ 
-			flow->flowFeatures.smallestPacket,                              /*  8 */
-			flow->flowFeatures.largestPacket,                               /*  9 */ 
-			flow->flowFeatures.meanPacketSize,                              /* 10 */
-			flow->flowFeatures.stdPacketSize,                               /* 11 */ 
-			flow->flowFeatures.minTimePacket,                               /* 12 */ 
-			flow->flowFeatures.maxTimePacket,                               /* 13 */ 
-			(double)flow->flowFeatures.meanTimePacket/FIT_USEC,             /* 14 */ 
-			flow->flowFeatures.stdTimePacket,                               /* 15 */ 
-			flow->flowFeatures.totalFIN,                                    /* 16 */ 
-			flow->flowFeatures.totalSYN,                                    /* 17 */ 
-			flow->flowFeatures.totalRST,                                    /* 18 */ 
-			flow->flowFeatures.totalPUSH,                                   /* 19 */ 
-			flow->flowFeatures.totalACK,                                    /* 21 */ 
-			flow->flowFeatures.totalURG,                                    /* 22 */ 
-			flow->flowFeatures.totalECE,                                    /* 23 */ 
-			flow->flowFeatures.totalCWR,                                    /* 24 */ 
-			(double)flow->flowFeatures.totalTime/FIT_USEC			/* 25 */ 
-			);                                                              
-	return;
-}
-
+/**  rever ordem das características ***/
 void 
 saveExpiredFlow(flowList_t *flow)
 {
+	double totalDuration,first,last;
 	
 	if(!flow->flowHeader.ipSrc[0])
 		return;
 
-	flow->flowFeatures.totalTime = flow->flowFeatures.lastTime - flow->flowFeatures.firstTime;
+	flow->flowFeatures.totalForwardTime = flow->flowFeatures.lastForwardTime - flow->flowFeatures.firstForwardTime;
+	flow->flowFeatures.totalBackwardTime = flow->flowFeatures.lastBackwardTime - flow->flowFeatures.firstBackwardTime;
+
+	if(flow->flowFeatures.totalForwardPackets > 1 && flow->flowFeatures.totalBackwardPackets > 1)
+	{
+		if(flow->flowFeatures.lastForwardTime > flow->flowFeatures.lastBackwardTime)
+			last = flow->flowFeatures.lastForwardTime;
+		else
+			last = flow->flowFeatures.lastBackwardTime;
+		
+		if(flow->flowFeatures.firstForwardTime > flow->flowFeatures.firstBackwardTime)
+			first = flow->flowFeatures.firstForwardTime;
+		else
+			first = flow->flowFeatures.firstBackwardTime;
+
+		totalDuration = last - first;
+
+	}
+	else if(flow->flowFeatures.totalForwardPackets > 1)
+	{
+		totalDuration = flow->flowFeatures.totalForwardPackets;	
+	}
+	else
+	{
+		totalDuration = flow->flowFeatures.totalBackwardPackets;		
+	}
+
 
 	/* save features */
-	fprintf(FLOWS_RESULTS,"%s,%s,%u,%u,%u,%u,%u,%u,%u,%g,%g,%li,%li,%f,%g,%u,%u,%u,%u,%u,%u,%u,%u,%f\n",
-			flow->flowHeader.ipSrc,						/*  1 */
-			flow->flowHeader.ipDst,						/*  2 */
-			flow->flowHeader.portSrc,                                       /*  3 */
-			flow->flowHeader.portDst,                                       /*  4 */
-			flow->flowHeader.protocol,                                      /*  5 */ 
-			flow->flowFeatures.flowSize,                                    /*  6 */
-			flow->flowFeatures.totalPackets,                                /*  7 */ 
-			flow->flowFeatures.smallestPacket,                              /*  8 */
-			flow->flowFeatures.largestPacket,                               /*  9 */ 
-			flow->flowFeatures.meanPacketSize,                              /* 10 */
-			flow->flowFeatures.stdPacketSize,                               /* 11 */ 
-			flow->flowFeatures.minTimePacket,                               /* 12 */ 
-			flow->flowFeatures.maxTimePacket,                               /* 13 */ 
-			(double)flow->flowFeatures.meanTimePacket/FIT_USEC,             /* 14 */ 
-			flow->flowFeatures.stdTimePacket,                               /* 15 */ 
-			flow->flowFeatures.totalFIN,                                    /* 16 */ 
-			flow->flowFeatures.totalSYN,                                    /* 17 */ 
-			flow->flowFeatures.totalRST,                                    /* 18 */ 
-			flow->flowFeatures.totalPUSH,                                   /* 19 */ 
-			flow->flowFeatures.totalACK,                                    /* 21 */ 
-			flow->flowFeatures.totalURG,                                    /* 22 */ 
-			flow->flowFeatures.totalECE,                                    /* 23 */ 
-			flow->flowFeatures.totalCWR,                                    /* 24 */ 
-			(double)flow->flowFeatures.totalTime/FIT_USEC			/* 25 */ 
+	fprintf(FLOWS_RESULTS,"%s,%u,%s,%u,%u,%u,%u,%u,%u,%g,%g,%li,%li,%f,%g,%u,%u,%u,%u,%u,%u,%u,%u,%f,%u,%u,%u,%u,%g,%g,%li,%li,%f,%g,%u,%u,%u,%u,%u,%u,%u,%u,%f,%f\n",
+
+			/********************************** flow header ******************************/
+
+			flow->flowHeader.ipSrc,						       /*  1 */
+			flow->flowHeader.portSrc,                                              /*  2 */
+			flow->flowHeader.ipDst,						       /*  3 */
+			flow->flowHeader.portDst,                                              /*  4 */
+			flow->flowHeader.protocol,                                             /*  5 */ 
+
+
+			/******************************* forward features *****************************/
+
+
+
+			flow->flowFeatures.flowForwardSize,                                    /*  6 */
+			flow->flowFeatures.totalForwardPackets,                                /*  7 */ 
+			flow->flowFeatures.smallestForwardPacket,                              /*  8 */
+			flow->flowFeatures.largestForwardPacket,                               /*  9 */ 
+			flow->flowFeatures.meanForwardPacketSize,                              /* 10 */
+			flow->flowFeatures.stdForwardPacketSize,                               /* 11 */ 
+			flow->flowFeatures.minForwardTimePacket,                               /* 12 */ 
+			flow->flowFeatures.maxForwardTimePacket,                               /* 13 */ 
+			(double)flow->flowFeatures.meanForwardTimePacket/FIT_USEC,             /* 14 */ 
+			flow->flowFeatures.stdForwardTimePacket,                               /* 15 */ 
+			flow->flowFeatures.totalForwardFIN,                                    /* 16 */ 
+			flow->flowFeatures.totalForwardSYN,                                    /* 17 */ 
+			flow->flowFeatures.totalForwardRST,                                    /* 18 */ 
+			flow->flowFeatures.totalForwardPUSH,                                   /* 19 */ 
+			flow->flowFeatures.totalForwardACK,                                    /* 21 */ 
+			flow->flowFeatures.totalForwardURG,                                    /* 22 */ 
+			flow->flowFeatures.totalForwardECE,                                    /* 23 */ 
+			flow->flowFeatures.totalForwardCWR,                                    /* 24 */ 
+			(double)flow->flowFeatures.totalForwardTime/FIT_USEC,		       /* 25 */ 
+
+			/******************************* backward features ****************************/
+
+			flow->flowFeatures.flowBackwardSize,                                   /* 26 */
+			flow->flowFeatures.totalBackwardPackets,                               /* 27 */ 
+			flow->flowFeatures.smallestBackwardPacket,                             /* 28 */
+			flow->flowFeatures.largestBackwardPacket,                              /* 29 */ 
+			flow->flowFeatures.meanBackwardPacketSize,                             /* 30 */
+			flow->flowFeatures.stdBackwardPacketSize,                              /* 31 */ 
+			flow->flowFeatures.minBackwardTimePacket,                              /* 32 */ 
+			flow->flowFeatures.maxBackwardTimePacket,                              /* 33 */ 
+			(double)flow->flowFeatures.meanBackwardTimePacket/FIT_USEC,            /* 34 */ 
+			flow->flowFeatures.stdBackwardTimePacket,                              /* 35 */ 
+			flow->flowFeatures.totalBackwardFIN,                                   /* 36 */ 
+			flow->flowFeatures.totalBackwardSYN,                                   /* 37 */ 
+			flow->flowFeatures.totalBackwardRST,                                   /* 38 */ 
+			flow->flowFeatures.totalBackwardPUSH,                                  /* 39 */ 
+			flow->flowFeatures.totalBackwardACK,                                   /* 40 */ 
+			flow->flowFeatures.totalBackwardURG,                                   /* 41 */ 
+			flow->flowFeatures.totalBackwardECE,                                   /* 42 */ 
+			flow->flowFeatures.totalBackwardCWR,                                   /* 43 */ 
+			(double)flow->flowFeatures.totalBackwardTime/FIT_USEC,		       /* 44 */ 
+			(double)totalDuration/FIT_USEC		       			       /* 45 */ 
+
+
+
 			);                                                              
 
-//	fclose(FLOWS_RESULTS);
 	return;
 }
 
 /*****************************************************************************************************************/
 
-/*************************************** copy functions **********************************************************/
-
-void
-copyHeader(flowID_t copy, flowID_t original)
-{	
-	strcpy(copy.ipSrc,original.ipSrc);
-	strcpy(copy.ipDst,original.ipDst);
-	copy.portSrc 	= original.portSrc;
-	copy.portDst 	= original.portDst;
-	copy.protocol 	= original.protocol;
-	copy.time 	= original.time;
-	return;
-}
-
-
-void
-copyFeatures(flowFeatures_t copy, flowFeatures_t original)
-{
-
-	copy.flowSize	 	= original.flowSize;	 
-	copy.smallestPacket	= original.smallestPacket;	 
-	copy.largestPacket	= original.largestPacket;	 
-	copy.totalPackets	= original.totalPackets;	 
-	copy.totalPSH	 	= original.totalPSH;	 
-	copy.totalURG	 	= original.totalURG;	 
-	copy.totalFIN	 	= original.totalFIN;	 
-	copy.totalACK	 	= original.totalACK;	 
-	copy.totalCWR	 	= original.totalCWR;	 
-	copy.totalECE	 	= original.totalECE;	 
-	copy.totalPUSH	 	= original.totalPUSH;	 
-	copy.totalRST	 	= original.totalRST;	 
-	copy.totalSYN	 	= original.totalSYN;	 
-	copy.meanPacketSize	= original.meanPacketSize;	 
-	copy.stdPacketSize	= original.stdPacketSize;	 
-	copy.meanTimePacket 	= original.meanTimePacket;	 
-	copy.stdTimePacket	= original.stdTimePacket;	 
-	copy.minTimePacket	= original.minTimePacket;	 
-	copy.maxTimePacket	= original.maxTimePacket;	 
-	copy.totalTime	 	= original.totalTime;	 
-	copy.firstTime	 	= original.firstTime;	 
-	copy.lastTime	 	= original.lastTime;	 
-	return;
-}
-
-/**********************************************************************************************************************/
 
 int 
 flowRemove(void)
 {
  	flowList_t *aux;
 	
-	if(!empty)						/* if the flow is on the list */
+	if(!empty)						/* if the FIFO is not empty  the list */
 	{
 
 			if(LIST_FIRST->next)			/* the flow is the first element, but have more elements */

@@ -3,7 +3,7 @@
 #define BLOCK_TIMER	-1		/* stop the timer that remove flows from the list */
 #define IP_TYPE		8		/* code of IP protocol */
 #define FORWARD		0		/* flow direction client -> server */
-#define BARCKWARD	1		/* flow direction client <- server */
+#define BACKWARD	1		/* flow direction client <- server */
 
 /* ethernet headers are always exactly 14 bytes [1] */
 #define SIZE_ETHERNET 14
@@ -142,7 +142,6 @@ typedef struct flowID{
 typedef struct flowList{
 	flowID_t flowHeader;
 	flowFeatures_t flowFeatures;
-	bool active;
 	struct flowList *next,*last;
 } flowList_t;
 
